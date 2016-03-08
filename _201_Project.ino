@@ -3,7 +3,7 @@
 
 // Defines for EEPROM locations
 #define slope 0
-#define offset 2
+#define offset 4
 
 LiquidCrystal display(12, 11, 5, 4, 3, 2);
 
