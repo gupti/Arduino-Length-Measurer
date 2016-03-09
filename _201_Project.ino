@@ -38,7 +38,6 @@ void setup()
     }
     do
     {
-      lcd.setCursor(0, 0);
       lcd.print("Calibration req.");
       lcd.setCursor(0, 1);
       lcd.print("Push btn to cont");
@@ -85,15 +84,13 @@ bool calibrate()
   
   if (!stepping)
   {
-    lcd.setCursor(0, 0);
     lcd.print("Calibration Fail");
     lcd.setCursor(0, 1);
     lcd.print("Step must be > 0");
     handleButtons();
     return 0;
   }
-
-  lcd.setCursor(0, 0);
+  
   lcd.print("Put probe @ ");
   lcd.print(currentPos);
   lcd.setCursor(0, 1);
@@ -106,10 +103,10 @@ bool calibrate()
     lcd.setCursor(12, 0);
     lcd.print(currentPos);
   }
-  
+
+  lcd.clear();
   if (!(numberOfPoints & 0xfe))
   {
-    lcd.setCursor(0, 0);
     lcd.print("Calibration Fail");
     lcd.setCursor(0, 1);
     lcd.print("# of Points < 2");
@@ -117,8 +114,6 @@ bool calibrate()
     return 0;
   }
 
-  lcd.clear();
-  lcd.setCursor(0, 0);
   lcd.print("Calculating...");
   // Calculate slope with linear regression, offset with center of mass, max distance with formulas
   unsigned long x = 0, y = 0, xy = 0, xx = 0;
@@ -145,26 +140,24 @@ bool calibrate()
   EEPROM.put(SLOPE, slope);
   EEPROM.put(OFFSET, offset);
   EEPROM.put(ERR, maxDev);
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Slope:");
-  lcd.setCursor(0, 1);
-  lcd.print(slope);
-  handleButtons();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Intercept:");
-  lcd.setCursor(0, 1);
-  lcd.print(offset);
-  handleButtons();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Max Deviation:");
-  lcd.setCursor(0, 1);
-  lcd.print(maxDev);
+  displayStoredData();
   return 1;
 }
 
+void displayStoredData()
+{
+  float currentData;
+  const String titles[] = {"Slope:", "Intercept:", "Max Deviation:"};
+  for (int i = 0; i < sizeof(float)*3; i += sizeof(float))
+  {
+    EEPROM.get(i, currentData);
+    lcd.clear();
+    lcd.print(titles[i]);
+    lcd.setCursor(0, 1);
+    lcd.print(currentData);
+    handleButtons();
+  }
+}
 uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits, uint16_t defaultNum)
 {
   // Because of display (16 digits) and uint16_t (max num is 32767) restrictions
@@ -177,7 +170,6 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
   if (lowerTitle.length() > 16 - maxDigits)
     lowerTitle = lowerTitle.substring(0, 16 - maxDigits);
   lcd.clear();
-  lcd.setCursor(0, 0);
   lcd.print(upperTitle);
   lcd.setCursor(0, 1);
   lcd.print(lowerTitle);
@@ -233,6 +225,19 @@ void loop()
   EEPROM.get(OFFSET, offset);
   while(true)
   {
-    lcd.print((analogRead(0)-offset)/slope);
+    lcd.print((analogRead(0) - offset) / slope);
+    if (digitalRead(8))
+    {
+      unsigned long holdTime= millis();
+      while (digitalRead(8));
+      if (millis() - holdTime > BTNTIME)
+      {
+        calibrate();
+        EEPROM.get(SLOPE, slope);
+        EEPROM.get(OFFSET, offset);
+      } else {
+        displayStoredData();
+      }
+    }
   }
 }
