@@ -19,7 +19,7 @@ void setup()
 {
   float f = 0.00f;
   lcd.begin(16, 2);
-
+  lcd.clear();
   // Setup button pins and measurement pins
   // Pin A0 is for the measurement probe
   for (int i = 0; i < sizeof(BUTTONLIST)/sizeof(uint8_t); i++)
@@ -76,7 +76,93 @@ int handleButtons()
 
 bool calibrate()
 {
-  return 0;
+  lcd.clear();
+  uint16_t startPos = uintCollection("Start dist", "(mm)", 3, 5),
+           stepping = uintCollection("Step size", "(mm)", 2, 5),
+           currentPos = startPos;
+  uint8_t numberOfPoints = 0, input;
+  uint16_t points [255];
+  
+  if (!stepping)
+  {
+    lcd.setCursor(0, 0);
+    lcd.print("Calibration Fail");
+    lcd.setCursor(0, 1);
+    lcd.print("Step must be > 0");
+    handleButtons();
+    return 0;
+  }
+
+  lcd.setCursor(0, 0);
+  lcd.print("Put probe @ ");
+  lcd.print(currentPos);
+  lcd.setCursor(0, 1);
+  lcd.print("and press btn.");
+  while (input = handleButtons() != -8)
+  {
+    points[numberOfPoints] = analogRead(0);
+    ++numberOfPoints;
+    currentPos = startPos + stepping*numberOfPoints;
+    lcd.setCursor(12, 0);
+    lcd.print(currentPos);
+  }
+  
+  if (!(numberOfPoints & 0xfe))
+  {
+    lcd.setCursor(0, 0);
+    lcd.print("Calibration Fail");
+    lcd.setCursor(0, 1);
+    lcd.print("# of Points < 2");
+    handleButtons();
+    return 0;
+  }
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Calculating...");
+  // Calculate slope with linear regression, offset with center of mass, max distance with formulas
+  unsigned long x = 0, y = 0, xy = 0, xx = 0;
+  uint8_t i;
+
+  for (i = 0; i < numberOfPoints; i++)
+  {
+    y += points[i];
+    x += i * stepping + startPos;
+    xy += points[i]*(i * stepping + startPos);
+    xx += (i * stepping + startPos)*(i * stepping + startPos);
+  }
+  float slope = ((float)numberOfPoints*xy - x*y)/(numberOfPoints*xx - x*x),
+  offset = ((float)y/numberOfPoints) - (slope*x/numberOfPoints),
+  maxDev = 0, currentDev;
+
+  for (i = 0; i < numberOfPoints; i++)
+  {
+    currentDev = abs(slope * (i * stepping + startPos) - points[i] + offset) / sqrt(1 + slope);
+    if (currentDev > maxDev)
+      maxDev = currentDev;
+  }
+  
+  EEPROM.put(SLOPE, slope);
+  EEPROM.put(OFFSET, offset);
+  EEPROM.put(ERR, maxDev);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Slope:");
+  lcd.setCursor(0, 1);
+  lcd.print(slope);
+  handleButtons();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Intercept:");
+  lcd.setCursor(0, 1);
+  lcd.print(offset);
+  handleButtons();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Max Deviation:");
+  lcd.setCursor(0, 1);
+  lcd.print(maxDev);
+  return 1;
 }
 
 uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits, uint16_t defaultNum)
@@ -90,7 +176,7 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
     upperTitle = upperTitle.substring(0, 16 - maxDigits);
   if (lowerTitle.length() > 16 - maxDigits)
     lowerTitle = lowerTitle.substring(0, 16 - maxDigits);
-
+  lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(upperTitle);
   lcd.setCursor(0, 1);
@@ -136,24 +222,17 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
   return finalNumber;
 }
 
-// Datapoints, stepSize, y is the point where the step starts
-float findSlope(uint8_t numberOfPoints, uint16_t *datapoints, uint8_t stepSize, uint8_t stepStart)
-{
-  unsigned long x = 0, y = 0, xy = 0, xx = 0;
-  int i;
-
-  for (i = 0; i < numberOfPoints; i++)
-  {
-    x += datapoints[i];
-    y += i * stepSize + stepStart;
-    xy += datapoints[i]*(i * stepSize + stepStart);
-    xx += datapoints[i]*datapoints[i];
-  }
-
-  return ((float)numberOfPoints*xy - x*y)/(numberOfPoints*xx - x*x);
-}
-
 void loop()
 {
-  
+  lcd.clear();
+  lcd.setCursor(0, 1);
+  lcd.print("mm");
+  lcd.setCursor(0, 0);
+  float slope, offset;
+  EEPROM.get(SLOPE, slope);
+  EEPROM.get(OFFSET, offset);
+  while(true)
+  {
+    lcd.print((analogRead(0)-offset)/slope);
+  }
 }
