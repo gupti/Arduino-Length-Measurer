@@ -4,22 +4,25 @@
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
 
-// Defines for EEPROM locations
+// Defines for EEPROM locations, and default hold-down time
 #define SLOPE 0
 #define OFFSET 4
 #define ERR 8
 #define BTNTIME 1500
 
-// 6 is up, 7 is down, 8 is select
+// Button list. 6 is up, 7 is down, 8 is select
 const uint8_t BUTTONLIST[] = {6, 7, 8};
 
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
 void setup()
 {
-  float f = 0.00f;
+  float f;
   lcd.begin(16, 2);
+// Delay for LCD startup, probably not required
+//  delay(1000);
   lcd.clear();
+  
   // Setup button pins and measurement pins
   // Pin A0 is for the measurement probe
   for (int i = 0; i < sizeof(BUTTONLIST)/sizeof(uint8_t); i++)
@@ -132,7 +135,8 @@ bool calibrate()
 
   for (i = 0; i < numberOfPoints; i++)
   {
-    currentDev = abs(slope * (i * stepping + startPos) - points[i] + offset) / sqrt(1 + slope);
+    currentDev = abs(points[i] - (slope * (i * stepping + startPos) + offset));
+//    currentDev = abs(slope * (i * stepping + startPos) - points[i] + offset) / sqrt(1 + slope);
     if (currentDev > maxDev)
       maxDev = currentDev;
   }
