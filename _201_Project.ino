@@ -45,7 +45,7 @@ void setup()
     } while(!calibrate());
   }
 }
-// Handles button input
+// Handles and waits for button input
 // Returns negative if button is hed for certain amount of time and onlift is true
 int handleButtons()
 {
@@ -95,7 +95,7 @@ bool calibrate()
   lcd.print(currentPos);
   lcd.setCursor(0, 1);
   lcd.print("and press btn.");
-  while (input = handleButtons() != -8)
+  while (input = handleButtons() != -BUTTONLIST[2])
   {
     points[numberOfPoints] = analogRead(0);
     ++numberOfPoints;
@@ -191,16 +191,16 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
     lcd.setCursor(16 - cursorPosition, 1);
     lcd.print(selectedNum[cursorPosition]);
     int action = handleButtons();
-    if (abs(action) == 6)
+    if (abs(action) == BUTTONLIST[0])
     {
       selectedNum[cursorPosition] = (selectedNum[cursorPosition] + 1) % 10;
-    } else if (abs(action) == 7)
+    } else if (abs(action) == BUTTONLIST[1])
     {
       selectedNum[cursorPosition] = (selectedNum[cursorPosition] - 1) % 10;
-    } else if (action == 8)
+    } else if (action == BUTTONLIST[2])
     {
       cursorPosition -= 1;
-    } else if (action == -8)
+    } else if (action == -BUTTONLIST[2])
     {
       cursorPosition = cursorPosition % 4 + 1;
     }
@@ -226,6 +226,7 @@ void loop()
   while(true)
   {
     lcd.print((analogRead(0) - offset) / slope);
+    // Quick button reading, cannot use handleButtons()
     if (digitalRead(8))
     {
       unsigned long holdTime= millis();
