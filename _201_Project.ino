@@ -3,7 +3,7 @@
 
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
-
+#include <math.h>
 // Defines for EEPROM locations, and default hold-down time
 #define SLOPE 0
 #define OFFSET 4
@@ -16,24 +16,21 @@ const uint8_t BUTTONLIST[] = {6, 7, 8};
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
 void setup()
-{
+{ 
   float f;
   lcd.begin(16, 2);
-// Delay for LCD startup, probably not required
-//  delay(1000);
-  lcd.clear();
-  
   // Setup button pins and measurement pins
   // Pin A0 is for the measurement probe
   for (int i = 0; i < sizeof(BUTTONLIST)/sizeof(uint8_t); i++)
   {
-    pinMode(i, INPUT);
+    pinMode(BUTTONLIST[i], INPUT);
   }
   
   EEPROM.get(SLOPE, f);
   // If the slope is zero, the device is not calibrated [properly]
-  if (abs(f) < 0.00001)
+  if (isnan(f) || abs(f) < 0.00001)
   {
+    f = 0;
     // Clear EEPROM
     for (int i = 0; i < sizeof(float)*3; i += sizeof(float))
     {
@@ -41,9 +38,9 @@ void setup()
     }
     do
     {
-      lcd.print("Calibration req.");
+      lcd.print("Calibration req");
       lcd.setCursor(0, 1);
-      lcd.print("Push btn to cont");
+      lcd.print("Push btn to ctn");
       handleButtons();
     } while(!calibrate());
   }
@@ -52,33 +49,31 @@ void setup()
 // Returns negative if button is hed for certain amount of time and onlift is true
 int handleButtons()
 {
-  bool x = true;
   uint8_t i = 0;
-  unsigned long buttonHeld = 0;
-  while(x)
+  unsigned long buttonHeld = millis();
+  while(millis() - buttonHeld < 40)
   {
-    for (i = 0; i < sizeof(BUTTONLIST)/sizeof(uint8_t); i++)
+    while (true)
     {
-      if (digitalRead(BUTTONLIST[i]))
+      i = (i + 1) % (sizeof(BUTTONLIST)/sizeof(uint8_t));
+      if (digitalRead(BUTTONLIST[i]) == HIGH)
       {
-        x = false;
+        buttonHeld = millis();
         break;
       }
     }
+    while(digitalRead(BUTTONLIST[i]) == HIGH);
   }
-  
-  buttonHeld = millis();
-  while(digitalRead(BUTTONLIST[i]));
   if (millis() - buttonHeld >= BTNTIME)
   {
-    return -i;
+    return - BUTTONLIST[i];
   }
-  return i;
+  return BUTTONLIST[i];
 }
 
 bool calibrate()
 {
-  lcd.clear();
+
   uint16_t startPos = uintCollection("Start dist", "(mm)", 3, 5),
            stepping = uintCollection("Step size", "(mm)", 2, 5),
            currentPos = startPos;
@@ -94,6 +89,7 @@ bool calibrate()
     return 0;
   }
   
+  lcd.clear();
   lcd.print("Put probe @ ");
   lcd.print(currentPos);
   lcd.setCursor(0, 1);
@@ -108,7 +104,7 @@ bool calibrate()
   }
 
   lcd.clear();
-  if (!(numberOfPoints & 0xfe))
+  if (numberOfPoints < 2)
   {
     lcd.print("Calibration Fail");
     lcd.setCursor(0, 1);
@@ -129,6 +125,7 @@ bool calibrate()
     xy += points[i]*(i * stepping + startPos);
     xx += (i * stepping + startPos)*(i * stepping + startPos);
   }
+  
   float slope = ((float)numberOfPoints*xy - x*y)/(numberOfPoints*xx - x*x),
   offset = ((float)y/numberOfPoints) - (slope*x/numberOfPoints),
   maxDev = 0, currentDev;
@@ -140,7 +137,6 @@ bool calibrate()
     if (currentDev > maxDev)
       maxDev = currentDev;
   }
-  
   EEPROM.put(SLOPE, slope);
   EEPROM.put(OFFSET, offset);
   EEPROM.put(ERR, maxDev);
@@ -156,11 +152,12 @@ void displayStoredData()
   {
     EEPROM.get(i, currentData);
     lcd.clear();
-    lcd.print(titles[i]);
+    lcd.print(titles[i/sizeof(float)]);
     lcd.setCursor(0, 1);
     lcd.print(currentData);
     handleButtons();
   }
+  lcd.clear();
 }
 uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits, uint16_t defaultNum)
 {
@@ -173,45 +170,47 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
     upperTitle = upperTitle.substring(0, 16 - maxDigits);
   if (lowerTitle.length() > 16 - maxDigits)
     lowerTitle = lowerTitle.substring(0, 16 - maxDigits);
+
   lcd.clear();
   lcd.print(upperTitle);
   lcd.setCursor(0, 1);
   lcd.print(lowerTitle);
-  lcd.setCursor(16 - maxDigits, 0);
-  lcd.print("v");
   lcd.setCursor(16 - maxDigits, 1);
   uint8_t selectedNum [4];
-  for (int i = 0; i < 4; i++)
-  {
-    selectedNum[i] = defaultNum/pow(10, i);
-    lcd.print(defaultNum/pow(10, i));
-  }
+  memset(selectedNum, 0, sizeof(selectedNum));
+  for (int i = 0; i < maxDigits; i++)
+    lcd.print(selectedNum[maxDigits - i - 1] = defaultNum/pow(10, maxDigits - i - 1));
 
-  uint8_t cursorPosition = maxDigits;
-  while (cursorPosition && cursorPosition <= maxDigits)
+  uint8_t cursorPosition = maxDigits - 1;
+  int action;
+  while (cursorPosition >= 0 && cursorPosition <= maxDigits)
   {
-    lcd.setCursor(16 - cursorPosition, 0);
+    lcd.setCursor(15 - cursorPosition, 0);
     lcd.print("v");
-    lcd.setCursor(16 - cursorPosition, 1);
+    lcd.setCursor(15 - cursorPosition, 1);
     lcd.print(selectedNum[cursorPosition]);
-    int action = handleButtons();
-    if (abs(action) == BUTTONLIST[0])
+    action = handleButtons();
+    if (abs(action) == BUTTONLIST[1])
     {
       selectedNum[cursorPosition] = (selectedNum[cursorPosition] + 1) % 10;
-    } else if (abs(action) == BUTTONLIST[1])
+    } else if (abs(action) == BUTTONLIST[0])
     {
       selectedNum[cursorPosition] = (selectedNum[cursorPosition] - 1) % 10;
     } else if (action == BUTTONLIST[2])
     {
-      cursorPosition -= 1;
-    } else if (action == -BUTTONLIST[2])
+      lcd.setCursor(15 - cursorPosition, 0);
+      lcd.print(" ");
+      --cursorPosition;
+    } else if (action == - BUTTONLIST[2])
     {
-      cursorPosition = cursorPosition % 4 + 1;
+      lcd.setCursor(15 - cursorPosition, 0);
+      lcd.print(" ");
+      cursorPosition = (cursorPosition + 1) % maxDigits;
     }
   }
 
   uint16_t finalNumber = 0;
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < maxDigits; i++)
   {
     finalNumber += selectedNum[i]*pow(10, i);
   }
@@ -221,20 +220,20 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
 void loop()
 {
   lcd.clear();
-  lcd.setCursor(0, 1);
-  lcd.print("mm");
-  lcd.setCursor(0, 0);
   float slope, offset;
+  unsigned long holdTime;
   EEPROM.get(SLOPE, slope);
   EEPROM.get(OFFSET, offset);
   while(true)
   {
+    lcd.setCursor(0, 0);
     lcd.print((analogRead(0) - offset) / slope);
+    lcd.print("mm");
     // Quick button reading, cannot use handleButtons()
-    if (digitalRead(8))
+    if (digitalRead(8) == HIGH)
     {
-      unsigned long holdTime= millis();
-      while (digitalRead(8));
+      holdTime = millis();
+      while (digitalRead(8) == HIGH);
       if (millis() - holdTime > BTNTIME)
       {
         calibrate();
