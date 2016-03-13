@@ -9,7 +9,11 @@
 #define OFFSET 4
 #define ERR 8
 #define BTNTIME 1500
+
+// Length of a LEGO stud
 #define STUDS 8
+// Return code if no button pressed, 0 by default
+#define NOBUTTON 0
 
 // Button list. 6 is up, 7 is down, 8 is select
 const uint8_t BUTTONLIST[] = {6, 7, 8};
@@ -42,22 +46,42 @@ void setup()
 }
 // Handles and waits for button input
 // Returns negative if button is hed for certain amount of time and onlift is true
-int handleButtons()
+int handleButtons(bool returnImmediately)
 {
   uint8_t i = 0;
-  unsigned long buttonHeld = millis();
-  while(millis() - buttonHeld < 40)
+  unsigned long buttonHeld;
+  if (!returnImmediately)
   {
-    while (true)
+    buttonHeld = millis();
+    while(millis() - buttonHeld < 40)
     {
-      i = (i + 1) % (sizeof(BUTTONLIST)/sizeof(uint8_t));
-      if (digitalRead(BUTTONLIST[i]) == HIGH)
+      while (true)
+      {
+        i = (i + 1) % (sizeof(BUTTONLIST)/sizeof(uint8_t));
+        if (digitalRead(BUTTONLIST[i]) == HIGH)
+        {
+          buttonHeld = millis();
+          break;
+        }
+      }
+      while(digitalRead(BUTTONLIST[i]) == HIGH);
+    }
+
+  } else {
+    for (i = 0; i < sizeof(BUTTONLIST)/sizeof(uint8_t) + 1; i++)
+    {
+      // Not button was pressed condition, return zero
+      if (i >= sizeof(BUTTONLIST)/sizeof(uint8_t))
+        return NOBUTTON;
+      
+      if (digitalRead(BUTTONLIST[i]))
       {
         buttonHeld = millis();
-        break;
+        while(digitalRead(BUTTONLIST[i]));
+        if (millis() - buttonHeld > 40)
+          break;
       }
     }
-    while(digitalRead(BUTTONLIST[i]) == HIGH);
   }
   if (millis() - buttonHeld >= BTNTIME)
   {
@@ -72,20 +96,20 @@ bool calibrate()
   lcd.print("Calibration");
   lcd.setCursor(0, 1);
   lcd.print("Push btn to ctn");
-  if (handleButtons() < 0)
+  if (handleButtons(false) < 0)
     return 0;
   uint16_t startPos = uintCollection("Start dist", "(mm)", 3, 5),
            stepping = uintCollection("Step size", "(mm)", 2, 5),
            currentPos = startPos;
   uint8_t numberOfPoints = 0, input;
-  uint16_t points [255];
+  uint16_t points [255], debounce;
   
   if (!stepping)
   {
     lcd.print("Calibration Fail");
     lcd.setCursor(0, 1);
     lcd.print("Step must be > 0");
-    handleButtons();
+    handleButtons(false);
     return 0;
   }
   
@@ -93,12 +117,26 @@ bool calibrate()
   lcd.print("Put probe @ ");
   lcd.print(currentPos);
   lcd.setCursor(0, 1);
-  lcd.print("and press btn.");
-  while (input = handleButtons() != -BUTTONLIST[2])
+  int8_t button;
+  while (numberOfPoints < 255)
   {
-    points[numberOfPoints] = analogRead(A4);
+    debounce = 0;
+    button = NOBUTTON;
+    while(button == NOBUTTON)
+    {
+      lcd.setCursor(0, 1);
+      lcd.print("Reading: ");
+      lcd.print(analogRead(A4));
+      lcd.print("   ");
+      button = handleButtons(true);
+    }
+    if (button < 0)
+      break;
+    for (int i = 0; i < 10; i++)
+      debounce += analogRead(A4);
+    points[numberOfPoints] = round((float)debounce/10);
     ++numberOfPoints;
-    currentPos = startPos + stepping*numberOfPoints;
+    currentPos = startPos + stepping * numberOfPoints;
     lcd.setCursor(12, 0);
     lcd.print(currentPos);
   }
@@ -109,7 +147,7 @@ bool calibrate()
     lcd.print("Calibration Fail");
     lcd.setCursor(0, 1);
     lcd.print("# of Points < 2");
-    handleButtons();
+    handleButtons(false);
     return 0;
   }
 
@@ -117,16 +155,14 @@ bool calibrate()
   // Calculate slope with linear regression, offset with center of mass, max distance with formulas
   unsigned long x = 0, y = 0, xy = 0, xx = 0;
   uint8_t i;
-
   for (i = 0; i < numberOfPoints; i++)
   {
     y += points[i];
-    x += i * stepping + startPos;
-    xy += points[i]*(i * stepping + startPos);
-    xx += (i * stepping + startPos)*(i * stepping + startPos);
+    x += (i * stepping) + startPos;
+    xy += ((unsigned long)points[i]) * ((unsigned long)((i * stepping) + startPos));
+    xx += ((unsigned long)((i * stepping) + startPos))*((unsigned long)((i * stepping) + startPos));
   }
-  
-  float slope = ((float)numberOfPoints*xy - x*y)/(numberOfPoints*xx - x*x),
+  float slope = ((float)((numberOfPoints*xy) - (x*y))) / ((numberOfPoints*xx) - (x*x)),
   offset = ((float)y/numberOfPoints) - (slope*x/numberOfPoints),
   maxDev = 0, currentDev;
 
@@ -166,7 +202,7 @@ void displayStoredData()
     Serial.print(titles[i/sizeof(float)]);
     Serial.print(" ");
     Serial.println(currentData);
-    handleButtons();
+    handleButtons(false);
   }
   lcd.clear();
 }
@@ -194,13 +230,13 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
 
   uint8_t cursorPosition = maxDigits - 1;
   int action;
-  while (cursorPosition >= 0 && cursorPosition <= maxDigits)
+  while (cursorPosition >= 0 && cursorPosition < maxDigits)
   {
     lcd.setCursor(15 - cursorPosition, 0);
     lcd.print("v");
     lcd.setCursor(15 - cursorPosition, 1);
     lcd.print(selectedNum[cursorPosition]);
-    action = handleButtons();
+    action = handleButtons(false);
     if (abs(action) == BUTTONLIST[0])
     {
       selectedNum[cursorPosition] = (selectedNum[cursorPosition] + 1) % 10;
@@ -235,6 +271,7 @@ void loop()
 {
   lcd.clear();
   float slope, offset, reading;
+  int8_t button;
   uint16_t holdTime;
   EEPROM.get(SLOPE, slope);
   EEPROM.get(OFFSET, offset);
@@ -248,20 +285,16 @@ void loop()
     lcd.print(round(reading/STUDS));
     lcd.print(" FLU           ");
     // Quick button reading, cannot use handleButtons()
-    if (digitalRead(8) == HIGH)
+    button = handleButtons(true);
+    if (button < 0)
     {
-      holdTime = millis();
-      while(digitalRead(8) == HIGH);
-      if (millis() - holdTime > 40 && calibrate())
+      if (calibrate())
       {
         EEPROM.get(SLOPE, slope);
         EEPROM.get(OFFSET, offset);
       }
-    } else if (digitalRead(7) == HIGH || digitalRead(6) == HIGH)
+    } else if (button != NOBUTTON)
     {
-      holdTime = millis();
-      while(digitalRead(7) == HIGH || digitalRead(6) == HIGH);
-      if (millis() - holdTime > 40)
         displayStoredData();
     }
   }
