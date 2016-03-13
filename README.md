@@ -1,3 +1,4 @@
-#Simple program for Statistic Project
+#Simple Program for Statistics Project
 
-Code for the Arduino Leonardo to measure length
+This code is for an Arduino to measure length using a linear 
+potentiometer.
