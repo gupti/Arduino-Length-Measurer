@@ -9,6 +9,7 @@
 #define OFFSET 4
 #define ERR 8
 #define BTNTIME 1500
+#define STUDS 8
 
 // Button list. 6 is up, 7 is down, 8 is select
 const uint8_t BUTTONLIST[] = {6, 7, 8};
@@ -20,7 +21,7 @@ void setup()
   float f;
   lcd.begin(16, 2);
   // Setup button pins and measurement pins
-  // Pin A0 is for the measurement probe
+  // Pin A4 is for the measurement probe
   for (int i = 0; i < sizeof(BUTTONLIST)/sizeof(uint8_t); i++)
   {
     pinMode(BUTTONLIST[i], INPUT);
@@ -36,13 +37,7 @@ void setup()
     {
       EEPROM.put(i, 0.00f);
     }
-    do
-    {
-      lcd.print("Calibration req");
-      lcd.setCursor(0, 1);
-      lcd.print("Push btn to ctn");
-      handleButtons();
-    } while(!calibrate());
+    while(!calibrate());
   }
 }
 // Handles and waits for button input
@@ -73,7 +68,12 @@ int handleButtons()
 
 bool calibrate()
 {
-
+  lcd.clear();
+  lcd.print("Calibration");
+  lcd.setCursor(0, 1);
+  lcd.print("Push btn to ctn");
+  if (handleButtons() < 0)
+    return 0;
   uint16_t startPos = uintCollection("Start dist", "(mm)", 3, 5),
            stepping = uintCollection("Step size", "(mm)", 2, 5),
            currentPos = startPos;
@@ -96,7 +96,7 @@ bool calibrate()
   lcd.print("and press btn.");
   while (input = handleButtons() != -BUTTONLIST[2])
   {
-    points[numberOfPoints] = analogRead(0);
+    points[numberOfPoints] = analogRead(A4);
     ++numberOfPoints;
     currentPos = startPos + stepping*numberOfPoints;
     lcd.setCursor(12, 0);
@@ -133,13 +133,21 @@ bool calibrate()
   for (i = 0; i < numberOfPoints; i++)
   {
     currentDev = abs(points[i] - (slope * (i * stepping + startPos) + offset));
-//    currentDev = abs(slope * (i * stepping + startPos) - points[i] + offset) / sqrt(1 + slope);
     if (currentDev > maxDev)
       maxDev = currentDev;
+  }
+
+  Serial.println("Distance (mm),Analog Reading");
+  for (i = 0; i < numberOfPoints; i++)
+  {
+    Serial.print(i * stepping + startPos);
+    Serial.print(",");
+    Serial.println(points[i]);
   }
   EEPROM.put(SLOPE, slope);
   EEPROM.put(OFFSET, offset);
   EEPROM.put(ERR, maxDev);
+  
   displayStoredData();
   return 1;
 }
@@ -155,6 +163,9 @@ void displayStoredData()
     lcd.print(titles[i/sizeof(float)]);
     lcd.setCursor(0, 1);
     lcd.print(currentData);
+    Serial.print(titles[i/sizeof(float)]);
+    Serial.print(" ");
+    Serial.println(currentData);
     handleButtons();
   }
   lcd.clear();
@@ -190,17 +201,20 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
     lcd.setCursor(15 - cursorPosition, 1);
     lcd.print(selectedNum[cursorPosition]);
     action = handleButtons();
-    if (abs(action) == BUTTONLIST[1])
+    if (abs(action) == BUTTONLIST[0])
     {
       selectedNum[cursorPosition] = (selectedNum[cursorPosition] + 1) % 10;
-    } else if (abs(action) == BUTTONLIST[0])
+    } else if (abs(action) == BUTTONLIST[1])
     {
-      selectedNum[cursorPosition] = (selectedNum[cursorPosition] - 1) % 10;
+      if (!selectedNum[cursorPosition])
+        selectedNum[cursorPosition] = 9;
+      else
+        --selectedNum[cursorPosition];
     } else if (action == BUTTONLIST[2])
     {
       lcd.setCursor(15 - cursorPosition, 0);
       lcd.print(" ");
-      --cursorPosition;
+      cursorPosition = (cursorPosition - 1) % maxDigits;
     } else if (action == - BUTTONLIST[2])
     {
       lcd.setCursor(15 - cursorPosition, 0);
@@ -212,7 +226,7 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
   uint16_t finalNumber = 0;
   for (int i = 0; i < maxDigits; i++)
   {
-    finalNumber += selectedNum[i]*pow(10, i);
+    finalNumber += round(pow(10, i))*selectedNum[i];
   }
   return finalNumber;
 }
@@ -220,28 +234,35 @@ uint16_t uintCollection(String upperTitle, String lowerTitle, uint8_t maxDigits,
 void loop()
 {
   lcd.clear();
-  float slope, offset;
-  unsigned long holdTime;
+  float slope, offset, reading;
+  uint16_t holdTime;
   EEPROM.get(SLOPE, slope);
   EEPROM.get(OFFSET, offset);
   while(true)
   {
+    reading = (analogRead(A4) - offset) / slope;
     lcd.setCursor(0, 0);
-    lcd.print((analogRead(0) - offset) / slope);
-    lcd.print("mm");
+    lcd.print(reading);
+    lcd.print(" mm            ");
+    lcd.setCursor(0, 1);
+    lcd.print(round(reading/STUDS));
+    lcd.print(" FLU           ");
     // Quick button reading, cannot use handleButtons()
     if (digitalRead(8) == HIGH)
     {
       holdTime = millis();
-      while (digitalRead(8) == HIGH);
-      if (millis() - holdTime > BTNTIME)
+      while(digitalRead(8) == HIGH);
+      if (millis() - holdTime > 40 && calibrate())
       {
-        calibrate();
         EEPROM.get(SLOPE, slope);
         EEPROM.get(OFFSET, offset);
-      } else {
-        displayStoredData();
       }
+    } else if (digitalRead(7) == HIGH || digitalRead(6) == HIGH)
+    {
+      holdTime = millis();
+      while(digitalRead(7) == HIGH || digitalRead(6) == HIGH);
+      if (millis() - holdTime > 40)
+        displayStoredData();
     }
   }
 }
